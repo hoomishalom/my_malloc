@@ -36,14 +36,21 @@ typedef struct meowheap meowheap;
 // functions
 
 /*
+inits a new heap
+@param heap the heap to initialize
+@param size the size of the heap
+*/
+void init_meowheap(meowheap *heap, size_t size);
+
+/*
 allocates memory (malloc)
 @param size size of the memory to allocate
 @return pointer to the allocated memory
 */
-void *meowalloc(size_t size);
+void *meowalloc(meowheap *heap, size_t size);
 
 /*
 free memory allocated by meowalloc (free)
 @param ptr pointer to memory to free
 */
-void meowfree(void *ptr);
+void meowfree(meowheap *heap, void *ptr);
