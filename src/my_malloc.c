@@ -1,4 +1,4 @@
-#include "my_malloc.h"  
+#include "../headers/my_malloc.h"  
 
 /*
 gets the size of the oversize needed for the meowchunk struct
@@ -22,6 +22,21 @@ static void print_stats(meowheap *heap)
     printf("used memory:        %d\n", heap -> size_used);
     printf("overhead memory:    %d\n", heap -> size_overhead);
     printf("total:              %d\n", heap -> size_overhead + heap -> size_used + heap -> size_free);
+}
+
+/*
+prints all chunk sizes
+*/
+static void print_sizes(meowchunk *start) 
+{
+    if (!start) return;
+
+    printf("Sizes: ");
+    while (start -> next) {
+        printf("%zu -> ", start -> size);
+        start = start -> next;
+    }
+    printf("%zu\n", start -> size);
 }
 
 /*
@@ -117,53 +132,67 @@ void *meowalloc(meowheap *heap, size_t size)
         return NULL;
     }
 
+    size_t min_fitting_size = SIZE_MAX;
     meowchunk *prev = NULL;
-    meowchunk *chunk = heap -> first_free;
-    while(chunk) {
-        if (chunk -> size > size) {
-            if (is_splitable(chunk, size)) {
-                meowchunk *returned_chunk = chunk; // create chunk
-                returned_chunk -> next = heap -> first_used;    // insert to used list
-                heap -> first_used = returned_chunk;
-                returned_chunk -> size = size;
+    meowchunk *chunk = NULL;
+    meowchunk *iterator = heap -> first_free;
 
-                meowchunk *splitted_chunk = (meowchunk *)((char *)chunk + get_overhead_size() + size);
-                splitted_chunk -> next = chunk -> next;
-                splitted_chunk -> size = chunk -> size - size - get_overhead_size();
-
-                if (prev) {
-                    prev -> next = splitted_chunk;
-                } else {
-                    heap -> first_free = splitted_chunk;
-                }
-
-                heap -> size_free -= (size + get_overhead_size());
-                heap -> size_used += size;
-                heap -> size_overhead += get_overhead_size();
-
-                return (void *)((char *)returned_chunk + get_overhead_size());    // pointer to the actual data storage
-            } else {
-                meowchunk *returned_chunk = chunk;
-
-                if (prev) {
-                    prev -> next = chunk -> next;
-                } else {
-                    heap -> first_free = chunk -> next;
-                }
-                
-                returned_chunk -> next = heap -> first_used;    // insert to used list
-                heap -> first_used = returned_chunk;
-                
-                heap -> size_free -= chunk -> size;
-                heap -> size_used += chunk -> size;
-                heap -> size_overhead += 0; // no need for more overhead if not splitting :)
-                
-                return (void *)((char *)returned_chunk + get_overhead_size());    // pointer to the actual data storage
-            }
-        } else {
-            prev = chunk;
-            chunk = chunk -> next;
+    while (iterator) {
+        if (iterator -> size < size || iterator -> size > min_fitting_size) {   // too small or worse fit
+            iterator = iterator -> next;
+        } else {    // found better fitting
+            min_fitting_size = iterator -> size;
+            chunk = iterator;
+            iterator = iterator -> next;
         }
+    }
+
+    while (iterator && iterator != chunk) {
+        prev = iterator;
+        iterator = iterator -> next;
+    }
+
+    if (chunk -> size > size) {
+        if (is_splitable(chunk, size)) {
+            meowchunk *splitted_chunk = (meowchunk *)((char *)chunk + get_overhead_size() + size);  // splitted chunk 
+            splitted_chunk -> next = chunk -> next;
+            splitted_chunk -> size = chunk -> size - size - get_overhead_size();
+            
+            meowchunk *returned_chunk = chunk; // create chunk
+            returned_chunk -> next = heap -> first_used;    // insert to used list
+            heap -> first_used = returned_chunk;
+            returned_chunk -> size = size;
+
+            if (prev) {
+                prev -> next = splitted_chunk;
+            } else {
+                heap -> first_free = splitted_chunk;
+            }
+
+            heap -> size_free -= (size + get_overhead_size());  // used chunk + overhead for new splitted chunk
+            heap -> size_used += size;                          // used chunk
+            heap -> size_overhead += get_overhead_size();       // overhead for new splitted chunk
+
+            return (void *)((char *)returned_chunk + get_overhead_size());    // pointer to the actual data storage
+        } else {
+            meowchunk *returned_chunk = chunk;
+
+            if (prev) {
+                prev -> next = chunk -> next;
+            } else {
+                heap -> first_free = chunk -> next;
+            }
+            
+            returned_chunk -> next = heap -> first_used;    // insert to used list
+            heap -> first_used = returned_chunk;
+            
+            heap -> size_free -= chunk -> size;     // used chunk
+            heap -> size_used += chunk -> size;     // used chunk
+            heap -> size_overhead += 0;             // no need for more overhead if not splitting :)
+            
+            return (void *)((char *)returned_chunk + get_overhead_size());    // pointer to the actual data storage
+        }
+
     }
     
     fprintf(stderr, "%s:%d - did not find a large enough chunk", __func__, __LINE__);
@@ -176,23 +205,24 @@ void meowfree(meowheap *heap, void *ptr)
     
     remove_used(heap, chunk);
     meowchunk *prev = insert_free(heap, chunk);
-
+    
     heap -> size_used -= chunk -> size;
     heap -> size_free += chunk -> size;
-
-    // try to coalesce chunks
+    
+    // try to coalesce chunks with next
     if (chunk -> next && (meowchunk *)((char *)chunk + chunk -> size + get_overhead_size()) == chunk -> next) {
         chunk -> size += chunk -> next -> size + get_overhead_size();
         chunk -> next = chunk -> next -> next;
-
+        
         heap -> size_free += get_overhead_size();
         heap -> size_overhead -= get_overhead_size();
     }
     
+    // try to coalesce chunks with prev
     if (prev && (meowchunk *)((char *)prev + prev -> size + get_overhead_size()) == chunk) {
         prev -> size += chunk -> size + get_overhead_size();
-        prev = chunk -> next;
-
+        prev -> next = chunk -> next;
+        
         heap -> size_free += get_overhead_size();
         heap -> size_overhead -= get_overhead_size();
     }
@@ -205,10 +235,10 @@ int main()
     meowchunk *ptr1 = (meowchunk *)meowalloc(&heap, 128);
     meowchunk *ptr2 = (meowchunk *)meowalloc(&heap, 128);
     meowchunk *ptr3 = (meowchunk *)meowalloc(&heap, 128);
-
+    
     meowfree(&heap, ptr1);
-    meowfree(&heap, ptr3);
     meowfree(&heap, ptr2);
+    meowfree(&heap, ptr3);
 
     print_stats(&heap);
     return 0;

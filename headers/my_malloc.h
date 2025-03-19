@@ -2,6 +2,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <assert.h>
+#include <limits.h>
 #include <sys/mman.h>
 
 #define MAP_ANONYMOUS 0x20  // fixing a problem with VScode
